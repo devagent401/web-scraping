@@ -1,0 +1,99 @@
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: scraping_postgres
+    environment:
+      POSTGRES_USER: scraping_user
+      POSTGRES_PASSWORD: scraping_password
+      POSTGRES_DB: scraping_db
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U scraping_user']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - scraping_network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: scraping_redis
+    ports:
+      - '6379:6379'
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - scraping_network
+
+  # Meilisearch
+  meilisearch:
+    image: getmeili/meilisearch:latest
+    container_name: scraping_meilisearch
+    environment:
+      MEILI_MASTER_KEY: masterKey
+      MEILI_ENV: development
+    ports:
+      - '7700:7700'
+    volumes:
+      - meilisearch_data:/data.ms
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:7700/health']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - scraping_network
+
+  # NestJS Application
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: scraping_api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      meilisearch:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      APP_PORT: 4001
+      APP_HOST: 0.0.0.0
+      DATABASE_URL: postgresql://scraping_user:scraping_password@postgres:5432/scraping_db
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+      MEILISEARCH_HOST: http://meilisearch:7700
+      MEILISEARCH_API_KEY: masterKey
+      JWT_SECRET: your-secret-key-change-this-in-production
+      REFRESH_TOKEN_SECRET: your-refresh-secret-key-change-this-in-production
+    ports:
+      - '4001:4001'
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: pnpm start:dev
+    networks:
+      - scraping_network
+
+volumes:
+  postgres_data:
+  redis_data:
+  meilisearch_data:
+
+networks:
+  scraping_network:
+    driver: bridge

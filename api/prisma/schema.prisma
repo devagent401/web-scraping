@@ -1,0 +1,413 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+//
+// Environment variables required:
+// - DATABASE_URL=postgresql://user:password@localhost:5432/scraping_db
+// - JWT_SECRET for authentication
+// - REFRESH_TOKEN_SECRET for refresh tokens
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// AUTHENTICATION & USER MANAGEMENT
+// ============================================================================
+
+/// User model for authentication with JWT support
+/// Tracks user accounts, roles, and authentication credentials
+model User {
+  id    String     @id @default(cuid())
+  email String     @unique
+  username  String @unique
+  password  String
+  firstName String?
+  lastName  String?
+  role      UserRole   @default(USER)
+  isActive  Boolean    @default(true)
+
+  // JWT-related fields
+  /// Last refresh token issued to the user
+  lastRefreshToken String?
+  /// Timestamp of last successful login
+  lastLoginAt DateTime?
+  /// Token version for invalidating old tokens
+  tokenVersion Int @default(0)
+
+  // Relations
+  /// API keys created by this user
+  apiKeys     ApiKey[]
+  /// Scrape jobs created by this user
+  scrapeJobs  ScrapeJob[]
+  /// Watchlist items for this user
+  watchlist   Watchlist[]
+  /// Search history for this user
+  searchHistory SearchHistory[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("users")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+  MODERATOR
+}
+
+/// API Key model for authentication
+/// Allows programmatic access to the API
+model ApiKey {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  key       String   @unique
+  name      String
+  isActive  Boolean  @default(true)
+  lastUsed  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@map("api_keys")
+}
+
+// ============================================================================
+// PRODUCT & PRICING DATA
+// ============================================================================
+
+/// Product model representing items being tracked
+/// Stores product details like name, description, pricing info, and inventory
+model Product {
+  id          String   @id @default(cuid())
+  /// Product name/title
+  name        String
+  /// Detailed product description
+  description String?
+  /// Base/reference price
+  price       Float?
+  /// Product image URL
+  image       String?
+  /// Product URL/link
+  url         String?
+  /// Current stock level
+  stock       Int      @default(0)
+  /// Warranty information (e.g., "1 year", "2 years")
+  warranty    String?
+  /// Product SKU for identification
+  sku         String?
+
+  // Relations
+  /// Price entries for this product across different shops
+  prices      Price[]
+  /// Price history tracking for this product
+  priceHistory PriceHistory[]
+  /// Users watching this product
+  watchlist   Watchlist[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([name])
+  @@index([sku])
+  @@index([createdAt])
+  @@map("products")
+}
+
+/// Shop model representing retailers/vendors
+/// Stores shop information like name, URL, and provider details
+model Shop {
+  id        String   @id @default(cuid())
+  /// Shop/vendor name
+  name      String   @unique
+  /// Shop website URL
+  url       String
+  /// Provider/platform name (e.g., "Amazon", "eBay", "Shopify")
+  provider  String
+  /// Whether the shop is currently active/monitored
+  isActive  Boolean  @default(true)
+
+  // Relations
+  /// Price entries from this shop
+  prices    Price[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([provider])
+  @@index([name])
+  @@map("shops")
+}
+
+/// Price model storing current prices across shops
+/// Tracks what price a product has at a specific shop at a specific time
+model Price {
+  id        String   @id @default(cuid())
+  /// Reference to the product
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  /// Reference to the shop
+  shopId    String
+  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  /// Current price at the shop
+  price     Float
+  /// Currency code (e.g., "USD", "EUR")
+  currency  String   @default("USD")
+  /// Date this price was recorded
+  date      DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([productId, shopId, date])
+  @@index([productId])
+  @@index([shopId])
+  @@index([date])
+  @@map("prices")
+}
+
+/// PriceHistory model for tracking price changes over time
+/// Used for analytics, price trends, and historical comparison
+model PriceHistory {
+  id        String   @id @default(cuid())
+  /// Reference to the product
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  /// Price at this point in time
+  price     Float
+  /// Currency code (e.g., "USD", "EUR")
+  currency  String   @default("USD")
+  /// Percentage change from previous price (-100 to 100+)
+  priceChange Float?
+  /// Note about the price change
+  note      String?
+  /// Date of this price record
+  date      DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([productId])
+  @@index([date])
+  @@map("price_history")
+}
+
+// ============================================================================
+// USER INTERACTIONS & TRACKING
+// ============================================================================
+
+/// Watchlist model tracking products users are monitoring
+/// Many-to-many relationship between users and products
+model Watchlist {
+  id        String   @id @default(cuid())
+  /// User watching the product
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Product being watched
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  /// Optional notes about why watching
+  notes     String?
+  /// Alert threshold for price drops
+  priceAlertThreshold Float?
+  /// Whether alerts are enabled for this watchlist item
+  alertEnabled Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, productId])
+  @@index([userId])
+  @@index([productId])
+  @@map("watchlist")
+}
+
+/// SearchHistory model tracking user searches
+/// Used for analytics, recommendations, and user behavior analysis
+model SearchHistory {
+  id        String   @id @default(cuid())
+  /// User who performed the search
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Search query/term
+  query     String
+  /// Number of results found
+  resultCount Int?
+  /// IP address of the requester
+  ipAddress String?
+  /// User agent of the request
+  userAgent String?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([query])
+  @@index([createdAt])
+  @@map("search_history")
+}
+
+// ============================================================================
+// SCRAPING & QUEUE MANAGEMENT
+// ============================================================================
+
+/// Scrape Job model for managing scraping tasks
+model ScrapeJob {
+  id           String        @id @default(cuid())
+  userId       String
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name         String
+  description  String?
+  url          String
+  selector     String?
+  type         ScrapeType    @default(CHEERIO)
+  status       JobStatus     @default(PENDING)
+  priority     Int           @default(0)
+
+  // Configuration
+  retryCount   Int           @default(0)
+  maxRetries   Int           @default(3)
+  timeout      Int           @default(30000)
+  userAgent    String?
+  headers      Json?
+  cookies      Json?
+  proxy        String?
+
+  // Results
+  results      ScrapeResult[]
+
+  // Scheduling
+  cronExpression String?
+  lastRunAt   DateTime?
+  nextRunAt   DateTime?
+  isScheduled Boolean @default(false)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@map("scrape_jobs")
+}
+
+enum ScrapeType {
+  CHEERIO
+  PLAYWRIGHT
+  PUPPETEER
+  SELENIUM
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  PAUSED
+  CANCELLED
+}
+
+// Scrape Result model
+model ScrapeResult {
+  id         String      @id @default(cuid())
+  jobId      String
+  job        ScrapeJob   @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  data       Json
+  statusCode Int?
+  error      String?
+  duration   Int?        // in milliseconds
+
+  // Indexing
+  indexed    Boolean     @default(false)
+  indexedAt  DateTime?
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([jobId])
+  @@index([createdAt])
+  @@map("scrape_results")
+}
+
+// Queue Job model
+model QueueJob {
+  id          String      @id @default(cuid())
+  name        String
+  type        String
+  data        Json
+  status      QueueStatus @default(PENDING)
+  priority    Int         @default(0)
+
+  attempts    Int         @default(0)
+  maxAttempts Int         @default(3)
+
+  error       String?
+  stackTrace  String?
+
+  scheduledFor DateTime?
+  startedAt   DateTime?
+  completedAt DateTime?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([status])
+  @@index([type])
+  @@index([scheduledFor])
+  @@map("queue_jobs")
+}
+
+enum QueueStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  DELAYED
+  CANCELLED
+}
+
+// Webhook model
+model Webhook {
+  id       String        @id @default(cuid())
+  name     String
+  url      String
+  events   WebhookEvent[]
+  isActive Boolean       @default(true)
+  secret   String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("webhooks")
+}
+
+model WebhookEvent {
+  id        String   @id @default(cuid())
+  webhookId String
+  webhook   Webhook  @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  event     String
+
+  @@index([webhookId])
+  @@map("webhook_events")
+}
+
+// Log model
+model Log {
+  id        String   @id @default(cuid())
+  level     String   // ERROR, WARN, INFO, DEBUG
+  message   String
+  context   String?
+  metadata  Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([level])
+  @@index([createdAt])
+  @@map("logs")
+}
