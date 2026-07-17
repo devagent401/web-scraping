@@ -1,13 +1,10 @@
 import { Controller, Get, Inject } from '@nestjs/common';
+import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+
 import { Public } from './common/decorators/public.decorator';
 import { LoggerService } from './common/logger/logger.service';
 
-/**
- * Application Root Controller
- *
- * Provides basic application information and health check endpoints
- * that don't require authentication.
- */
+@ApiTags('Health')
 @Controller()
 export class AppController {
   constructor(
@@ -16,9 +13,10 @@ export class AppController {
     this.logger.setContext('AppController');
   }
 
-  /** Health check endpoint used by load balancers and monitoring tools */
   @Public()
   @Get('/health')
+  @ApiOperation({ summary: 'Liveness health check' })
+  @ApiResponse({ status: 200, description: 'Service is up' })
   health() {
     this.logger.logRequest('GET', '/health');
     return {
@@ -30,9 +28,10 @@ export class AppController {
     };
   }
 
-  /** Readiness check endpoint to verify the app is ready to handle requests */
   @Public()
   @Get('/ready')
+  @ApiOperation({ summary: 'Readiness check' })
+  @ApiResponse({ status: 200, description: 'Service is ready' })
   ready() {
     this.logger.logRequest('GET', '/ready');
     return {
@@ -41,9 +40,10 @@ export class AppController {
     };
   }
 
-  /** Application info endpoint returning API metadata */
   @Public()
   @Get('/info')
+  @ApiOperation({ summary: 'Application metadata' })
+  @ApiResponse({ status: 200, description: 'API name, version, environment' })
   info() {
     this.logger.logRequest('GET', '/info');
     return {

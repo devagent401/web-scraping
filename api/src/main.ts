@@ -1,5 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, VersioningType } from '@nestjs/common';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
@@ -25,7 +26,12 @@ async function bootstrap() {
   // ============================================
   // SECURITY MIDDLEWARE
   // ============================================
-  app.use(helmet());
+  // Relax CSP so Swagger UI assets load correctly
+  app.use(
+    helmet({
+      contentSecurityPolicy: nodeEnv === 'production' ? undefined : false,
+    }),
+  );
   app.use(cookieParser());
 
   // Note: RequestIdMiddleware is registered in AppModule via NestModule.configure()
@@ -81,6 +87,41 @@ async function bootstrap() {
     new LoggingInterceptor(loggerService),
     new ResponseInterceptor(),
   );
+
+  // ============================================
+  // SWAGGER / OPENAPI
+  // ============================================
+  const swaggerConfig = new DocumentBuilder()
+    .setTitle('Scraping API')
+    .setDescription(
+      'Price-tracking & web scraping API. Admin configures shops/categories, ' +
+        'bots scrape products into PostgreSQL + Meilisearch, users search & compare.',
+    )
+    .setVersion(apiVersion)
+    .addBearerAuth(
+      {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+        description: 'Paste access token from POST /api/v1/auth/login',
+      },
+      'JWT-auth',
+    )
+    .addTag('Health', 'Health, readiness and app info')
+    .addTag('Auth', 'Register, login, refresh, logout')
+    .addTag('Search', 'Product search and price compare (Meilisearch)')
+    .addTag('Admin', 'Shop, category and scrape-target management (ADMIN only)')
+    .build();
+
+  const document = SwaggerModule.createDocument(app, swaggerConfig);
+  SwaggerModule.setup('api/docs', app, document, {
+    swaggerOptions: {
+      persistAuthorization: true,
+      tagsSorter: 'alpha',
+      operationsSorter: 'alpha',
+    },
+    customSiteTitle: 'Scraping API Docs',
+  });
 
   // ============================================
   // GRACEFUL SHUTDOWN
@@ -151,6 +192,10 @@ async function bootstrap() {
     );
     loggerService.log(
       `API Prefix: /api`,
+      'Bootstrap',
+    );
+    loggerService.log(
+      `Swagger Docs: ${appUrl}/api/docs`,
       'Bootstrap',
     );
     loggerService.log(

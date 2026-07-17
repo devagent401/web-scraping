@@ -19,34 +19,23 @@ datasource db {
 // AUTHENTICATION & USER MANAGEMENT
 // ============================================================================
 
-/// User model for authentication with JWT support
-/// Tracks user accounts, roles, and authentication credentials
 model User {
-  id    String     @id @default(cuid())
-  email String     @unique
-  username  String @unique
+  id        String   @id @default(cuid())
+  email     String   @unique
+  username  String   @unique
   password  String
   firstName String?
   lastName  String?
-  role      UserRole   @default(USER)
-  isActive  Boolean    @default(true)
+  role      UserRole @default(USER)
+  isActive  Boolean  @default(true)
 
-  // JWT-related fields
-  /// Last refresh token issued to the user
   lastRefreshToken String?
-  /// Timestamp of last successful login
-  lastLoginAt DateTime?
-  /// Token version for invalidating old tokens
-  tokenVersion Int @default(0)
+  lastLoginAt      DateTime?
+  tokenVersion     Int       @default(0)
 
-  // Relations
-  /// API keys created by this user
-  apiKeys     ApiKey[]
-  /// Scrape jobs created by this user
-  scrapeJobs  ScrapeJob[]
-  /// Watchlist items for this user
-  watchlist   Watchlist[]
-  /// Search history for this user
+  apiKeys       ApiKey[]
+  scrapeJobs    ScrapeJob[]
+  watchlist     Watchlist[]
   searchHistory SearchHistory[]
 
   createdAt DateTime @default(now())
@@ -61,16 +50,14 @@ enum UserRole {
   MODERATOR
 }
 
-/// API Key model for authentication
-/// Allows programmatic access to the API
 model ApiKey {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  key       String   @unique
-  name      String
-  isActive  Boolean  @default(true)
-  lastUsed  DateTime?
+  id       String    @id @default(cuid())
+  userId   String
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  key      String    @unique
+  name     String
+  isActive Boolean   @default(true)
+  lastUsed DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -80,63 +67,103 @@ model ApiKey {
 }
 
 // ============================================================================
+// CATEGORIES & SCRAPE TARGETS
+// ============================================================================
+
+enum CategorySource {
+  MANUAL
+  FROM_URL
+}
+
+model Category {
+  id     String         @id @default(cuid())
+  name   String
+  slug   String         @unique
+  source CategorySource @default(MANUAL)
+
+  scrapeTargets ShopScrapeTarget[]
+  products      Product[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([name])
+  @@map("categories")
+}
+
+model ShopScrapeTarget {
+  id               String     @id @default(cuid())
+  shopId           String
+  shop             Shop       @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  categoryId       String
+  category         Category   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  url              String
+  isActive         Boolean    @default(true)
+  lastScrapedAt    DateTime?
+  lastScrapeStatus JobStatus?
+  lastError        String?
+
+  scrapeJobs ScrapeJob[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([shopId, categoryId, url])
+  @@index([shopId])
+  @@index([categoryId])
+  @@index([isActive])
+  @@map("shop_scrape_targets")
+}
+
+// ============================================================================
 // PRODUCT & PRICING DATA
 // ============================================================================
 
-/// Product model representing items being tracked
-/// Stores product details like name, description, pricing info, and inventory
 model Product {
-  id          String   @id @default(cuid())
-  /// Product name/title
+  id          String  @id @default(cuid())
   name        String
-  /// Detailed product description
   description String?
-  /// Base/reference price
   price       Float?
-  /// Product image URL
   image       String?
-  /// Product URL/link
   url         String?
-  /// Current stock level
-  stock       Int      @default(0)
-  /// Warranty information (e.g., "1 year", "2 years")
+  stock       Int     @default(0)
   warranty    String?
-  /// Product SKU for identification
   sku         String?
 
-  // Relations
-  /// Price entries for this product across different shops
-  prices      Price[]
-  /// Price history tracking for this product
+  /// Unique listing URL used for upsert matching
+  externalUrl   String?   @unique
+  lastScrapedAt DateTime?
+
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  shopId     String?
+  shop       Shop?     @relation(fields: [shopId], references: [id], onDelete: SetNull)
+
+  prices       Price[]
   priceHistory PriceHistory[]
-  /// Users watching this product
-  watchlist   Watchlist[]
+  watchlist    Watchlist[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([name])
   @@index([sku])
+  @@index([shopId])
+  @@index([categoryId])
   @@index([createdAt])
   @@map("products")
 }
 
-/// Shop model representing retailers/vendors
-/// Stores shop information like name, URL, and provider details
 model Shop {
-  id        String   @id @default(cuid())
-  /// Shop/vendor name
-  name      String   @unique
-  /// Shop website URL
-  url       String
-  /// Provider/platform name (e.g., "Amazon", "eBay", "Shopify")
-  provider  String
-  /// Whether the shop is currently active/monitored
-  isActive  Boolean  @default(true)
+  id       String  @id @default(cuid())
+  name     String  @unique
+  url      String
+  provider String
+  isActive Boolean @default(true)
 
-  // Relations
-  /// Price entries from this shop
-  prices    Price[]
+  prices        Price[]
+  products      Product[]
+  scrapeTargets ShopScrapeTarget[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -146,21 +173,14 @@ model Shop {
   @@map("shops")
 }
 
-/// Price model storing current prices across shops
-/// Tracks what price a product has at a specific shop at a specific time
 model Price {
   id        String   @id @default(cuid())
-  /// Reference to the product
   productId String
   product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
-  /// Reference to the shop
   shopId    String
   shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  /// Current price at the shop
   price     Float
-  /// Currency code (e.g., "USD", "EUR")
-  currency  String   @default("USD")
-  /// Date this price was recorded
+  currency  String   @default("BDT")
   date      DateTime
 
   createdAt DateTime @default(now())
@@ -173,23 +193,15 @@ model Price {
   @@map("prices")
 }
 
-/// PriceHistory model for tracking price changes over time
-/// Used for analytics, price trends, and historical comparison
 model PriceHistory {
-  id        String   @id @default(cuid())
-  /// Reference to the product
-  productId String
-  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
-  /// Price at this point in time
-  price     Float
-  /// Currency code (e.g., "USD", "EUR")
-  currency  String   @default("USD")
-  /// Percentage change from previous price (-100 to 100+)
+  id          String   @id @default(cuid())
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  price       Float
+  currency    String   @default("BDT")
   priceChange Float?
-  /// Note about the price change
-  note      String?
-  /// Date of this price record
-  date      DateTime
+  note        String?
+  date        DateTime
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -203,22 +215,15 @@ model PriceHistory {
 // USER INTERACTIONS & TRACKING
 // ============================================================================
 
-/// Watchlist model tracking products users are monitoring
-/// Many-to-many relationship between users and products
 model Watchlist {
-  id        String   @id @default(cuid())
-  /// User watching the product
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  /// Product being watched
-  productId String
-  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
-  /// Optional notes about why watching
-  notes     String?
-  /// Alert threshold for price drops
-  priceAlertThreshold Float?
-  /// Whether alerts are enabled for this watchlist item
-  alertEnabled Boolean @default(true)
+  id                    String  @id @default(cuid())
+  userId                String
+  user                  User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId             String
+  product               Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  notes                 String?
+  priceAlertThreshold   Float?
+  alertEnabled          Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -229,21 +234,14 @@ model Watchlist {
   @@map("watchlist")
 }
 
-/// SearchHistory model tracking user searches
-/// Used for analytics, recommendations, and user behavior analysis
 model SearchHistory {
-  id        String   @id @default(cuid())
-  /// User who performed the search
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  /// Search query/term
-  query     String
-  /// Number of results found
+  id          String  @id @default(cuid())
+  userId      String
+  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  query       String
   resultCount Int?
-  /// IP address of the requester
-  ipAddress String?
-  /// User agent of the request
-  userAgent String?
+  ipAddress   String?
+  userAgent   String?
 
   createdAt DateTime @default(now())
 
@@ -257,41 +255,40 @@ model SearchHistory {
 // SCRAPING & QUEUE MANAGEMENT
 // ============================================================================
 
-/// Scrape Job model for managing scraping tasks
 model ScrapeJob {
-  id           String        @id @default(cuid())
-  userId       String
-  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name         String
-  description  String?
-  url          String
-  selector     String?
-  type         ScrapeType    @default(CHEERIO)
-  status       JobStatus     @default(PENDING)
-  priority     Int           @default(0)
+  id          String     @id @default(cuid())
+  userId      String?
+  user        User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+  targetId    String?
+  target      ShopScrapeTarget? @relation(fields: [targetId], references: [id], onDelete: SetNull)
+  name        String
+  description String?
+  url         String
+  selector    String?
+  type        ScrapeType @default(CHEERIO)
+  status      JobStatus  @default(PENDING)
+  priority    Int        @default(0)
 
-  // Configuration
-  retryCount   Int           @default(0)
-  maxRetries   Int           @default(3)
-  timeout      Int           @default(30000)
-  userAgent    String?
-  headers      Json?
-  cookies      Json?
-  proxy        String?
+  retryCount Int     @default(0)
+  maxRetries Int     @default(3)
+  timeout    Int     @default(30000)
+  userAgent  String?
+  headers    Json?
+  cookies    Json?
+  proxy      String?
 
-  // Results
-  results      ScrapeResult[]
+  results ScrapeResult[]
 
-  // Scheduling
   cronExpression String?
-  lastRunAt   DateTime?
-  nextRunAt   DateTime?
-  isScheduled Boolean @default(false)
+  lastRunAt      DateTime?
+  nextRunAt      DateTime?
+  isScheduled    Boolean   @default(false)
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([userId])
+  @@index([targetId])
   @@index([status])
   @@map("scrape_jobs")
 }
@@ -312,50 +309,47 @@ enum JobStatus {
   CANCELLED
 }
 
-// Scrape Result model
 model ScrapeResult {
-  id         String      @id @default(cuid())
+  id         String    @id @default(cuid())
   jobId      String
-  job        ScrapeJob   @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  job        ScrapeJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
   data       Json
   statusCode Int?
   error      String?
-  duration   Int?        // in milliseconds
+  duration   Int?
 
-  // Indexing
-  indexed    Boolean     @default(false)
-  indexedAt  DateTime?
+  indexed   Boolean   @default(false)
+  indexedAt DateTime?
 
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([jobId])
   @@index([createdAt])
   @@map("scrape_results")
 }
 
-// Queue Job model
 model QueueJob {
-  id          String      @id @default(cuid())
-  name        String
-  type        String
-  data        Json
-  status      QueueStatus @default(PENDING)
-  priority    Int         @default(0)
+  id           String      @id @default(cuid())
+  name         String
+  type         String
+  data         Json
+  status       QueueStatus @default(PENDING)
+  priority     Int         @default(0)
 
-  attempts    Int         @default(0)
-  maxAttempts Int         @default(3)
+  attempts    Int @default(0)
+  maxAttempts Int @default(3)
 
-  error       String?
-  stackTrace  String?
+  error      String?
+  stackTrace String?
 
   scheduledFor DateTime?
-  startedAt   DateTime?
-  completedAt DateTime?
+  startedAt    DateTime?
+  completedAt  DateTime?
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([status])
   @@index([type])
@@ -372,13 +366,12 @@ enum QueueStatus {
   CANCELLED
 }
 
-// Webhook model
 model Webhook {
-  id       String        @id @default(cuid())
+  id       String         @id @default(cuid())
   name     String
   url      String
   events   WebhookEvent[]
-  isActive Boolean       @default(true)
+  isActive Boolean        @default(true)
   secret   String
 
   createdAt DateTime @default(now())
@@ -388,22 +381,21 @@ model Webhook {
 }
 
 model WebhookEvent {
-  id        String   @id @default(cuid())
+  id        String  @id @default(cuid())
   webhookId String
-  webhook   Webhook  @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  webhook   Webhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
   event     String
 
   @@index([webhookId])
   @@map("webhook_events")
 }
 
-// Log model
 model Log {
-  id        String   @id @default(cuid())
-  level     String   // ERROR, WARN, INFO, DEBUG
-  message   String
-  context   String?
-  metadata  Json?
+  id       String  @id @default(cuid())
+  level    String
+  message  String
+  context  String?
+  metadata Json?
 
   createdAt DateTime @default(now())
 
